@@ -1517,7 +1517,11 @@ const AUDIO = (() => {
   function ensureCtx() {
     if (ctx) return;
     ctx = new (window.AudioContext || window.webkitAudioContext)();
-    master = ctx.createGain(); master.gain.value = muted ? 0 : BASE_VOL; master.connect(ctx.destination);
+    master = ctx.createGain(); master.gain.value = muted ? 0 : BASE_VOL;
+    const masterLP = ctx.createBiquadFilter(); masterLP.type = 'lowpass'; masterLP.frequency.value = 2600; masterLP.Q.value = .3;
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -18; limiter.knee.value = 24; limiter.ratio.value = 6; limiter.attack.value = .01; limiter.release.value = .25;
+    master.connect(masterLP); masterLP.connect(limiter); limiter.connect(ctx.destination);
     ambientGain = ctx.createGain(); ambientGain.gain.value = 1; ambientGain.connect(master);
     sfxGain = ctx.createGain(); sfxGain.gain.value = 1; sfxGain.connect(master);
   }
@@ -1561,23 +1565,25 @@ const AUDIO = (() => {
       setTimeout(pop, 150 + Math.random() * 550);
     })();
   }
-  /* 纯音乐：五声音阶随机长音，缓入缓出，营造舒缓氛围 */
+  /* 纯音乐：五声音阶随机长音，缓入缓出，营造舒缓氛围（低八度 + 柔化滤波，避免刺耳） */
   const SCALE = [220.0, 246.94, 277.18, 329.63, 369.99, 415.30];
   function startPad() {
     (function note() {
       if (!ctx) return;
-      const freq = SCALE[Math.floor(Math.random() * SCALE.length)] * (Math.random() < .5 ? 1 : .5);
+      const freq = SCALE[Math.floor(Math.random() * SCALE.length)] * .5;
       const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = freq;
-      const osc2 = ctx.createOscillator(); osc2.type = 'triangle'; osc2.frequency.value = freq * 1.003;
+      const osc2 = ctx.createOscillator(); osc2.type = 'sine'; osc2.frequency.value = freq * 2.003;
+      const g2 = ctx.createGain(); g2.gain.value = .35;
+      const padLP = ctx.createBiquadFilter(); padLP.type = 'lowpass'; padLP.frequency.value = 1400; padLP.Q.value = .2;
       const g = ctx.createGain(); g.gain.value = 0;
-      osc.connect(g); osc2.connect(g); g.connect(ambientGain);
-      const now = ctx.currentTime, atk = 2.2, hold = 3.0, rel = 3.5;
-      g.gain.linearRampToValueAtTime(.04, now + atk);
-      g.gain.setValueAtTime(.04, now + atk + hold);
+      osc.connect(g); osc2.connect(g2); g2.connect(g); g.connect(padLP); padLP.connect(ambientGain);
+      const now = ctx.currentTime, atk = 3.0, hold = 3.0, rel = 4.0;
+      g.gain.linearRampToValueAtTime(.028, now + atk);
+      g.gain.setValueAtTime(.028, now + atk + hold);
       g.gain.linearRampToValueAtTime(0, now + atk + hold + rel);
       osc.start(now); osc2.start(now);
       osc.stop(now + atk + hold + rel + .1); osc2.stop(now + atk + hold + rel + .1);
-      setTimeout(note, (atk + hold + rel) * 1000 * .6 + Math.random() * 4000);
+      setTimeout(note, (atk + hold + rel) * 1000 * .7 + Math.random() * 4500);
     })();
   }
   function start() { if (started) return; started = true; ensureCtx(); if (ctx.state === 'suspended') ctx.resume(); startWind(); startFire(); startPad(); }
