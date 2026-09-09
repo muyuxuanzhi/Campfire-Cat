@@ -1537,7 +1537,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 });
 addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'r' && GM.decorMode && GM.selectedFurniture) ghostRot += Math.PI / 6; });
 
-/* ---- 音效与环境音（Web Audio API 实时合成，无需外部音频文件，整体音量克制不刺耳） ---- */
+/* ---- 音效与环境音：背景只使用用户提供的篝火录音循环播放，不再叠加合成的风声/纯音乐 ---- */
 const AUDIO = (() => {
   const MUTE_KEY = 'witch_idle_web_muted_v1';
   const BASE_VOL = 0.55;
@@ -1555,27 +1555,6 @@ const AUDIO = (() => {
     master.connect(masterLP); masterLP.connect(limiter); limiter.connect(ctx.destination);
     ambientGain = ctx.createGain(); ambientGain.gain.value = 1; ambientGain.connect(master);
     sfxGain = ctx.createGain(); sfxGain.gain.value = 1; sfxGain.connect(master);
-  }
-  function noiseBuffer(dur) {
-    const n = Math.floor(ctx.sampleRate * dur);
-    const buf = ctx.createBuffer(1, n, ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    let last = 0;
-    for (let i = 0; i < n; i++) { const w = Math.random() * 2 - 1; last = (last + .02 * w) / 1.02; d[i] = last * 3.2; }
-    return buf;
-  }
-  /* 风声：滤波噪声循环 + 双 LFO 极缓慢调制频率与音量，做成克制的低语背景风声（降低调制深度，避免"呜呜"感明显） */
-  function startWind() {
-    const src = ctx.createBufferSource(); src.buffer = noiseBuffer(4); src.loop = true;
-    const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 420; filter.Q.value = .5;
-    const gain = ctx.createGain(); gain.gain.value = .028;
-    src.connect(filter); filter.connect(gain); gain.connect(ambientGain); src.start();
-    const lfo = ctx.createOscillator(); lfo.frequency.value = .06;
-    const lfoGain = ctx.createGain(); lfoGain.gain.value = 55;
-    lfo.connect(lfoGain); lfoGain.connect(filter.frequency); lfo.start();
-    const lfo2 = ctx.createOscillator(); lfo2.frequency.value = .04;
-    const lfoGain2 = ctx.createGain(); lfoGain2.gain.value = .01;
-    lfo2.connect(lfoGain2); lfoGain2.connect(gain.gain); lfo2.start();
   }
   /* 篝火：真实录音循环播放（assets/audio/bonfire.wav），低通柔化 + 缓入淡入，避免刺耳 */
   let fireBufferPromise = null;
@@ -1596,30 +1575,9 @@ const AUDIO = (() => {
       src.connect(filter); filter.connect(gain); gain.connect(ambientGain);
       src.start();
       gain.gain.linearRampToValueAtTime(.22, ctx.currentTime + 2.5);
-    }).catch(() => { /* 加载失败时静默忽略，不影响其他环境音 */ });
+    }).catch(() => { /* 加载失败时静默忽略 */ });
   }
-  /* 纯音乐：五声音阶随机长音，缓入缓出，营造舒缓氛围（低八度 + 柔化滤波，避免刺耳） */
-  const SCALE = [220.0, 246.94, 277.18, 329.63, 369.99, 415.30];
-  function startPad() {
-    (function note() {
-      if (!ctx) return;
-      const freq = SCALE[Math.floor(Math.random() * SCALE.length)] * .5;
-      const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = freq;
-      const osc2 = ctx.createOscillator(); osc2.type = 'sine'; osc2.frequency.value = freq * 2.003;
-      const g2 = ctx.createGain(); g2.gain.value = .35;
-      const padLP = ctx.createBiquadFilter(); padLP.type = 'lowpass'; padLP.frequency.value = 1400; padLP.Q.value = .2;
-      const g = ctx.createGain(); g.gain.value = 0;
-      osc.connect(g); osc2.connect(g2); g2.connect(g); g.connect(padLP); padLP.connect(ambientGain);
-      const now = ctx.currentTime, atk = 3.0, hold = 3.0, rel = 4.0;
-      g.gain.linearRampToValueAtTime(.028, now + atk);
-      g.gain.setValueAtTime(.028, now + atk + hold);
-      g.gain.linearRampToValueAtTime(0, now + atk + hold + rel);
-      osc.start(now); osc2.start(now);
-      osc.stop(now + atk + hold + rel + .1); osc2.stop(now + atk + hold + rel + .1);
-      setTimeout(note, (atk + hold + rel) * 1000 * .7 + Math.random() * 4500);
-    })();
-  }
-  function start() { if (started) return; started = true; ensureCtx(); if (ctx.state === 'suspended') ctx.resume(); startWind(); startFire(); startPad(); }
+  function start() { if (started) return; started = true; ensureCtx(); if (ctx.state === 'suspended') ctx.resume(); startFire(); }
 
   function playMeow() {
     ensureCtx(); if (ctx.state === 'suspended') ctx.resume();
