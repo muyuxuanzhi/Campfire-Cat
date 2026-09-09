@@ -95,13 +95,16 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /* ═════ 渲染 ═════ */
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+/* 移动端画质自适应：手机 GPU 性能有限，自动关闭抗锯齿/软阴影、降低像素比、减弱辉光，大幅降低卡顿 */
+const isMobile = /Android|iPhone|iPad|iPod|Mobi|Windows Phone/i.test(navigator.userAgent)
+  || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+const renderer = new THREE.WebGLRenderer({ antialias: !isMobile, powerPreference: 'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.7));
+renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1 : 1.7));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.42;
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = !isMobile;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
@@ -121,7 +124,7 @@ controls.touches = { ONE: THREE.TOUCH.NONE, TWO: THREE.TOUCH.DOLLY_ROTATE };
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.26, 0.80, 0.92));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), isMobile ? 0.14 : 0.26, 0.80, 0.92));
 composer.addPass(new OutputPass());
 
 /* ═════ 夜空 IBL + 穹顶 + 月亮 ═════ */
@@ -1111,8 +1114,8 @@ for (let i = 0; i < 14; i++) {
 }
 
 /* ═════ 粒子动效 ═════ */
-/* 萤火虫 */
-const FF = 90;
+/* 萤火虫（手机端减半，降低每帧粒子更新开销） */
+const FF = isMobile ? 45 : 90;
 const ffGeo = new THREE.BufferGeometry();
 const ffPos = new Float32Array(FF * 3), ffData = [];
 for (let i = 0; i < FF; i++) {
@@ -1148,8 +1151,8 @@ for (let i = 0; i < 16; i++) {
   s.userData = { t: i / 16, sp: rr(.28, .5), dx: rr(.1, .35), oz: rr(-.2, .2) };
   CHIM.add(s); smokes.push(s);
 }
-/* 篝火火星 */
-const SPK = 60;
+/* 篝火火星（手机端减半） */
+const SPK = isMobile ? 30 : 60;
 const spkGeo = new THREE.BufferGeometry();
 const spkPos = new Float32Array(SPK * 3), spkData = [];
 for (let i = 0; i < SPK; i++) {
@@ -1283,7 +1286,26 @@ const CAT = {
 const _catFootVec = new THREE.Vector3();
 const catLoader = new GLTFLoader();
 const CAT_FOOT_BONE_NAMES = ['leg_front_left_toe', 'leg_front_right_toe', 'leg_hind_left_toe', 'leg_hind_right_toe'];
+/* 占位猫咪：在真实模型（约20MB，手机网络下可能较慢或失败）加载完成前，先显示一个简单几何体，
+   保证猫咪永远"看得见"，不会因为加载慢/加载失败而在画面上消失 */
+let catPlaceholder = null;
+function buildCatPlaceholder() {
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2e, roughness: .85 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.15, 4, 8), bodyMat);
+  body.rotation.z = Math.PI / 2; body.position.y = .12;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 10), bodyMat);
+  head.position.set(.15, .16, 0);
+  const earGeo = new THREE.ConeGeometry(.025, .05, 6);
+  [-1, 1].forEach((s) => { const ear = new THREE.Mesh(earGeo, bodyMat); ear.position.set(.17, .22, s * .04); g.add(ear); });
+  g.add(body, head);
+  g.position.set(CAT.position.x, 0, CAT.position.z);
+  g.castShadow = false;
+  return g;
+}
 function loadCat() {
+  catPlaceholder = buildCatPlaceholder();
+  G.add(catPlaceholder);
   catLoader.load('assets/cat/rig.glb', (gltf) => {
     const root = gltf.scene;
     const box = new THREE.Box3().setFromObject(root);
@@ -1296,6 +1318,7 @@ function loadCat() {
     root.position.set(CAT.position.x, 0, CAT.position.z);
     G.add(root);
     CAT.root = root;
+    if (catPlaceholder) { G.remove(catPlaceholder); catPlaceholder = null; }
     /* 脚部骨骼：用于每帧动态贴地，消除因绑定姿势与走/跑动画姿态差异造成的穿模与"一跳一跳"抖动 */
     CAT.feet = CAT_FOOT_BONE_NAMES.map(n => root.getObjectByName(n)).filter(Boolean);
     CAT.mixer = new THREE.AnimationMixer(root);
@@ -1305,9 +1328,12 @@ function loadCat() {
         const action = CAT.mixer.clipAction(clip, root);
         CAT.actions[key] = action;
         if (key === 'idle') { action.play(); CAT.current = action; }
-      });
+      }, undefined, (err) => console.error('猫咪动画加载失败(' + key + '.glb)：', err));
     });
     const glow = new THREE.PointLight(0xffebc8, .22, 1.6, 2.0); glow.position.set(0, .26, 0); root.add(glow);
+  }, undefined, (err) => {
+    console.error('猫咪模型加载失败(rig.glb)，已保留占位模型：', err);
+    if (typeof hintEl !== 'undefined' && hintEl) hintEl.textContent = '猫咪模型加载失败，请检查网络后刷新页面重试';
   });
 }
 function catMoveTo(x, z) { CAT.target.set(x, 0, z); CAT.moving = true; }
@@ -1538,17 +1564,17 @@ const AUDIO = (() => {
     for (let i = 0; i < n; i++) { const w = Math.random() * 2 - 1; last = (last + .02 * w) / 1.02; d[i] = last * 3.2; }
     return buf;
   }
-  /* 风声：滤波噪声循环 + 双 LFO 缓慢调制频率与音量，模拟阵风 */
+  /* 风声：滤波噪声循环 + 双 LFO 极缓慢调制频率与音量，做成克制的低语背景风声（降低调制深度，避免"呜呜"感明显） */
   function startWind() {
     const src = ctx.createBufferSource(); src.buffer = noiseBuffer(4); src.loop = true;
-    const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 500; filter.Q.value = .6;
-    const gain = ctx.createGain(); gain.gain.value = .045;
+    const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 420; filter.Q.value = .5;
+    const gain = ctx.createGain(); gain.gain.value = .028;
     src.connect(filter); filter.connect(gain); gain.connect(ambientGain); src.start();
-    const lfo = ctx.createOscillator(); lfo.frequency.value = .07;
-    const lfoGain = ctx.createGain(); lfoGain.gain.value = 220;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = .06;
+    const lfoGain = ctx.createGain(); lfoGain.gain.value = 55;
     lfo.connect(lfoGain); lfoGain.connect(filter.frequency); lfo.start();
-    const lfo2 = ctx.createOscillator(); lfo2.frequency.value = .045;
-    const lfoGain2 = ctx.createGain(); lfoGain2.gain.value = .02;
+    const lfo2 = ctx.createOscillator(); lfo2.frequency.value = .04;
+    const lfoGain2 = ctx.createGain(); lfoGain2.gain.value = .01;
     lfo2.connect(lfoGain2); lfoGain2.connect(gain.gain); lfo2.start();
   }
   /* 篝火：真实录音循环播放（assets/audio/bonfire.wav），低通柔化 + 缓入淡入，避免刺耳 */
@@ -1741,10 +1767,10 @@ function updateSoundBtn() { soundToggleBtn.textContent = AUDIO.isMuted() ? '🔇
 soundToggleBtn.addEventListener('click', () => { AUDIO.toggleMute(); updateSoundBtn(); });
 updateSoundBtn();
 
-/* ---- 帧率设置：不同性能的手机/电脑可自行选择目标帧率，低配设备选低帧率更省电更流畅 ---- */
+/* ---- 帧率设置：不同性能的手机/电脑可自行选择目标帧率，默认从最低档开始保证流畅，可自行往上调 ---- */
 const FPS_KEY = 'witch_idle_web_fps_v1';
 const FPS_OPTIONS = [30, 45, 60, 90, 120, 0]; /* 0 表示不限帧率，跟随屏幕刷新率 */
-let fpsIndex = 2; /* 默认 60 */
+let fpsIndex = 0; /* 默认 30（最低档），性能好的设备可点按钮往上调 */
 try {
   const saved = parseInt(localStorage.getItem(FPS_KEY), 10);
   const idx = FPS_OPTIONS.indexOf(saved);
