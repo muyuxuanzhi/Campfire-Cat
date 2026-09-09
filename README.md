@@ -4,7 +4,9 @@
 
 在线体验：将本仓库部署到 GitHub Pages 后即可直接在浏览器中打开游玩（纯前端，无需安装、无需服务器）。
 
-![篝火与猫游戏截图](screenshots/campfire-cat-01.png)
+![篝火与猫游戏截图1](screenshots/campfire-cat-02.png)
+![篝火与猫游戏截图2](screenshots/campfire-cat-03.png)
+![篝火与猫游戏截图3](screenshots/campfire-cat-04.png)
 
 ---
 
@@ -53,12 +55,6 @@ npx serve -p 5500
 ```
 
 然后在浏览器中访问 `http://localhost:5500/index.html` 即可开始游玩。
-
-## 部署到 GitHub Pages
-
-1. 将本仓库推送到 GitHub。
-2. 在仓库 Settings → Pages 中，选择 `main` 分支的根目录作为发布源。
-3. 保存后即可通过 `https://<你的用户名>.github.io/<仓库名>/` 在线体验。
 
 ---
 
