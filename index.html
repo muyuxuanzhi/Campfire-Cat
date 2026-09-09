@@ -62,9 +62,10 @@ canvas{display:block;touch-action:none}
     </div>
   </div>
   <div id="bottom-bar" class="panel">
-    <div id="hint-label">拖动屏幕旋转视角 · 点击地面遛猫咪</div>
+    <div id="hint-label">拖动(手机双指)旋转视角 · 点击地面遛猫咪</div>
     <div id="bottom-bar-row">
       <button id="sound-toggle" class="pill-btn active" title="环境音开关">🔊</button>
+      <button id="fps-toggle" class="pill-btn" title="点击切换目标帧率，配置较低的设备可选择较低帧率更流畅">帧率:60</button>
       <button id="decor-toggle" class="pill-btn">装饰模式</button>
       <div id="furniture-bar">
         <button class="furn-btn" data-type="lantern">灯笼</button>
@@ -115,6 +116,8 @@ controls.target.set(0, 1.3, 0.6);
 controls.enableDamping = true; controls.dampingFactor = 0.06;
 controls.minDistance = 8; controls.maxDistance = 46;
 controls.maxPolarAngle = Math.PI * 0.487;
+/* 手机端：单指专用于点击地面遛猫咪/摆放装饰，视角旋转与缩放改为双指手势，避免手势冲突 */
+controls.touches = { ONE: THREE.TOUCH.NONE, TWO: THREE.TOUCH.DOLLY_ROTATE };
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
@@ -1478,7 +1481,9 @@ function updateGhost() {
 let _downX = 0, _downY = 0;
 renderer.domElement.addEventListener('pointerdown', (e) => { _downX = e.clientX; _downY = e.clientY; });
 renderer.domElement.addEventListener('pointerup', (e) => {
-  if (Math.hypot(e.clientX - _downX, e.clientY - _downY) > 6) return;
+  /* 触屏手指按下时天然存在轻微抖动，容差需比鼠标点击更大，避免识别为拖动而无法遛猫咪 */
+  const tapTolerance = e.pointerType === 'touch' ? 20 : 6;
+  if (Math.hypot(e.clientX - _downX, e.clientY - _downY) > tapTolerance) return;
   pointerNDC.x = (e.clientX / innerWidth) * 2 - 1; pointerNDC.y = -(e.clientY / innerHeight) * 2 + 1;
   if (GM.decorMode && GM.deleteMode) {
     raycaster.setFromCamera(pointerNDC, camera);
@@ -1546,24 +1551,26 @@ const AUDIO = (() => {
     const lfoGain2 = ctx.createGain(); lfoGain2.gain.value = .02;
     lfo2.connect(lfoGain2); lfoGain2.connect(gain.gain); lfo2.start();
   }
-  /* 篝火：低频噪声“烘”声 + 随机爆裂噼啪声 */
+  /* 篝火：真实录音循环播放（assets/audio/bonfire.wav），低通柔化 + 缓入淡入，避免刺耳 */
+  let fireBufferPromise = null;
+  function loadFireBuffer() {
+    if (!fireBufferPromise) {
+      fireBufferPromise = fetch('assets/audio/bonfire.wav')
+        .then((r) => r.arrayBuffer())
+        .then((buf) => ctx.decodeAudioData(buf));
+    }
+    return fireBufferPromise;
+  }
   function startFire() {
-    const src = ctx.createBufferSource(); src.buffer = noiseBuffer(3); src.loop = true;
-    const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 900;
-    const gain = ctx.createGain(); gain.gain.value = .04;
-    src.connect(filter); filter.connect(gain); gain.connect(ambientGain); src.start();
-    (function pop() {
+    loadFireBuffer().then((buffer) => {
       if (!ctx) return;
-      const dur = .03 + Math.random() * .05;
-      const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
-      const d = buf.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
-      const src2 = ctx.createBufferSource(); src2.buffer = buf;
-      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1200 + Math.random() * 2000; bp.Q.value = 1.2;
-      const g2 = ctx.createGain(); g2.gain.value = .04 + Math.random() * .05;
-      src2.connect(bp); bp.connect(g2); g2.connect(ambientGain); src2.start();
-      setTimeout(pop, 150 + Math.random() * 550);
-    })();
+      const src = ctx.createBufferSource(); src.buffer = buffer; src.loop = true;
+      const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 3000; filter.Q.value = .5;
+      const gain = ctx.createGain(); gain.gain.value = 0;
+      src.connect(filter); filter.connect(gain); gain.connect(ambientGain);
+      src.start();
+      gain.gain.linearRampToValueAtTime(.22, ctx.currentTime + 2.5);
+    }).catch(() => { /* 加载失败时静默忽略，不影响其他环境音 */ });
   }
   /* 纯音乐：五声音阶随机长音，缓入缓出，营造舒缓氛围（低八度 + 柔化滤波，避免刺耳） */
   const SCALE = [220.0, 246.94, 277.18, 329.63, 369.99, 415.30];
@@ -1654,7 +1661,7 @@ addEventListener('pointerdown', function unlockAudio() { AUDIO.start(); removeEv
 const $ = (id) => document.getElementById(id);
 const stateLabelEl = $('state-label'), countdownEl = $('countdown-label'), sessionEl = $('session-label');
 const startBtn = $('start-btn'), resetBtn = $('reset-btn');
-const decorToggleBtn = $('decor-toggle'), furnitureBar = $('furniture-bar'), deleteToggleBtn = $('delete-toggle'), rotateBtn = $('rotate-btn'), cancelBtn = $('cancel-btn'), hintEl = $('hint-label'), soundToggleBtn = $('sound-toggle');
+const decorToggleBtn = $('decor-toggle'), furnitureBar = $('furniture-bar'), deleteToggleBtn = $('delete-toggle'), rotateBtn = $('rotate-btn'), cancelBtn = $('cancel-btn'), hintEl = $('hint-label'), soundToggleBtn = $('sound-toggle'), fpsToggleBtn = $('fps-toggle');
 const presetBtns = Array.from(document.querySelectorAll('.preset-btn'));
 const furnBtns = Array.from(document.querySelectorAll('.furn-btn'));
 const STATE_TEXT = { 0: '点击「开始专注」陪伴喵~', 1: '专注中…', 2: '小憩一下', 3: '长休息，放松一下', 4: '已暂停' };
@@ -1733,15 +1740,47 @@ cancelBtn.addEventListener('click', () => {
 function updateSoundBtn() { soundToggleBtn.textContent = AUDIO.isMuted() ? '🔇' : '🔊'; soundToggleBtn.classList.toggle('active', !AUDIO.isMuted()); }
 soundToggleBtn.addEventListener('click', () => { AUDIO.toggleMute(); updateSoundBtn(); });
 updateSoundBtn();
+
+/* ---- 帧率设置：不同性能的手机/电脑可自行选择目标帧率，低配设备选低帧率更省电更流畅 ---- */
+const FPS_KEY = 'witch_idle_web_fps_v1';
+const FPS_OPTIONS = [30, 45, 60, 90, 120, 0]; /* 0 表示不限帧率，跟随屏幕刷新率 */
+let fpsIndex = 2; /* 默认 60 */
+try {
+  const saved = parseInt(localStorage.getItem(FPS_KEY), 10);
+  const idx = FPS_OPTIONS.indexOf(saved);
+  if (idx >= 0) fpsIndex = idx;
+} catch (e) { }
+let targetFPS = FPS_OPTIONS[fpsIndex];
+function updateFpsBtn() { fpsToggleBtn.textContent = '帧率:' + (targetFPS > 0 ? targetFPS : '不限'); }
+fpsToggleBtn.addEventListener('click', () => {
+  fpsIndex = (fpsIndex + 1) % FPS_OPTIONS.length;
+  targetFPS = FPS_OPTIONS[fpsIndex];
+  try { localStorage.setItem(FPS_KEY, String(targetFPS)); } catch (e) { }
+  updateFpsBtn();
+});
+updateFpsBtn();
 /* 所有 UI 按钮点击时播放轻柔的提示音 */
 document.getElementById('ui-root').addEventListener('click', (e) => { if (e.target.closest('button')) AUDIO.playClick(); });
 updateStateUI(); updateTimeUI(GM.remaining); updateSessionUI(); updateHint(); refreshDecorButtonsVisibility();
 
 /* ═════ 动画 ═════ */
 const clock = new THREE.Clock();
+let _fpsAccum = 0;
 function tick() {
   requestAnimationFrame(tick);
-  const dt = Math.min(clock.getDelta(), .05), t = clock.elapsedTime;
+  const rawDt = clock.getDelta();
+  let dt;
+  if (targetFPS > 0) {
+    /* 限帧：累计时间未达到目标帧间隔时跳过本帧渲染，降低低配设备负载 */
+    _fpsAccum += rawDt;
+    const frameTime = 1 / targetFPS;
+    if (_fpsAccum < frameTime) return;
+    dt = Math.min(_fpsAccum, .1);
+    _fpsAccum = 0;
+  } else {
+    dt = Math.min(rawDt, .05);
+  }
+  const t = clock.elapsedTime;
 
   GM.update(dt);
   updateCat(dt);
