@@ -1221,13 +1221,14 @@ const GM = (() => {
     placeFurniture(type, pos, ry) {
       if (!(type in FURNITURE_NAMES)) return false;
       if (Math.hypot(pos.x, pos.z) > this.getBuildRadius()) return false;
-      this.placedItems.push({ type, x: pos.x, z: pos.z, ry });
-      this.emit('placedItems'); this.save(); return true;
+      const item = { type, x: pos.x, z: pos.z, ry };
+      const idx = this.placedItems.push(item) - 1;
+      this.emit('itemPlaced', item, idx); this.save(); return true;
     },
     removeFurniture(idx) {
       if (idx < 0 || idx >= this.placedItems.length) return false;
       this.placedItems.splice(idx, 1);
-      this.emit('placedItems'); this.save(); return true;
+      this.emit('itemRemoved', idx); this.save(); return true;
     },
     update(dt) {
       if (this.state === State.WORK || this.state === State.SHORT_BREAK || this.state === State.LONG_BREAK) {
@@ -1455,16 +1456,34 @@ function buildFurnitureVisual(type, x, z, ry, mode = 'real') {
   }
   return n;
 }
+/* 已放置家具的可视对象列表，与 GM.placedItems 一一对应。放置/删除只增删单个对象，
+   不再整体清空重建：
+   1）避免每次放置/删除都对所有已放置物重新创建几何体造成的卡顿（物品越多卡得越久）；
+   2）避免蘑菇丛等造型内部使用随机偏移，被反复重新生成导致"看起来随机移动/换位置"。 */
+const furnitureVisuals = [];
+function disposeFurnitureVisual(g) {
+  g.traverse((o) => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+}
+function addFurnitureVisual(item, idx, mode = 'real') {
+  const g = buildFurnitureVisual(item.type, item.x, item.z, item.ry, mode);
+  g.userData.itemIndex = idx;
+  furnitureRoot.add(g);
+  furnitureVisuals.splice(idx, 0, g);
+}
+function removeFurnitureVisual(idx) {
+  const g = furnitureVisuals[idx]; if (!g) return;
+  furnitureRoot.remove(g); disposeFurnitureVisual(g);
+  furnitureVisuals.splice(idx, 1);
+  for (let i = idx; i < furnitureVisuals.length; i++) furnitureVisuals[i].userData.itemIndex = i;
+}
 function rebuildPlacedFurniture() {
-  furnitureRoot.clear();
-  GM.placedItems.forEach((item, idx) => {
-    const g = buildFurnitureVisual(item.type, item.x, item.z, item.ry, 'load');
-    g.userData.itemIndex = idx;
-    furnitureRoot.add(g);
-  });
+  furnitureVisuals.forEach(disposeFurnitureVisual);
+  furnitureRoot.clear(); furnitureVisuals.length = 0;
+  GM.placedItems.forEach((item, idx) => addFurnitureVisual(item, idx, 'load'));
 }
 rebuildPlacedFurniture();
-GM.on('placedItems', rebuildPlacedFurniture);
+GM.on('itemPlaced', (item, idx) => addFurnitureVisual(item, idx, 'real'));
+GM.on('itemRemoved', (idx) => removeFurnitureVisual(idx));
 
 /* 空地范围提示环（随番茄钟完成数解锁扩大） */
 let expandRing = new THREE.Mesh(
