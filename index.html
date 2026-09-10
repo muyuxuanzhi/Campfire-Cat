@@ -1289,7 +1289,10 @@ const CAT = {
 const _catFootVec = new THREE.Vector3();
 const catLoader = new GLTFLoader();
 const CAT_FOOT_BONE_NAMES = ['leg_front_left_toe', 'leg_front_right_toe', 'leg_hind_left_toe', 'leg_hind_right_toe'];
-/* ---- 猫咪换装：模型完全不变，只替换材质的贴图（base_color + normal），
+/* ---- 猫咪换装：模型完全不变，只替换材质的贴图。每套皮肤包含 4 张贴图信息：
+   base_color(反照率,JPEG有损即可) + normal(法线,PNG无损) + orm(粗糙度G/金属度B合并,PNG无损，
+   对应 glTF 标准 metallicRoughnessTexture)。normal/orm 是逐通道独立编码的数据贴图，
+   一旦用带色度抽样的 JPEG 压缩会导致通道互相污染，出现色块/光照错乱，所以必须用无损 PNG。
    贴图按需懒加载并缓存，避免一次性加载全部皮肤增加流量 ---- */
 const CAT_SKINS = [
   { id: 'default', name: '经典黑猫' },
@@ -1311,16 +1314,21 @@ function loadSkinTextures(skinId) {
       resolve(tex);
     }, undefined, reject);
   });
-  const p = Promise.all([loadOne('base_color.jpg', true), loadOne('normal.jpg', false)])
-    .then(([map, normalMap]) => ({ map, normalMap }));
+  const p = Promise.all([loadOne('base_color.jpg', true), loadOne('normal.png', false), loadOne('orm.png', false)])
+    .then(([map, normalMap, orm]) => ({ map, normalMap, roughnessMap: orm, metalnessMap: orm, roughness: 1, metalness: 1 }));
   CAT.skinCache[skinId] = p;
   return p;
 }
 function applyCatSkinTextures(tex) {
   if (!tex || !CAT.material) return;
-  CAT.material.map = tex.map;
-  CAT.material.normalMap = tex.normalMap;
-  CAT.material.needsUpdate = true;
+  const m = CAT.material;
+  m.map = tex.map;
+  m.normalMap = tex.normalMap;
+  m.roughnessMap = tex.roughnessMap || null;
+  m.metalnessMap = tex.metalnessMap || null;
+  m.roughness = tex.roughnessMap ? (tex.roughness ?? 1) : (tex.roughness ?? 0.5);
+  m.metalness = tex.metalnessMap ? (tex.metalness ?? 1) : (tex.metalness ?? 0);
+  m.needsUpdate = true;
 }
 function setCatSkin(index, opts = {}) {
   const silent = !!opts.silent, save = opts.save !== false;
@@ -1372,9 +1380,13 @@ function loadCat() {
     G.add(root);
     CAT.root = root;
     if (catPlaceholder) { G.remove(catPlaceholder); catPlaceholder = null; }
-    /* 换装：把模型自带的原始贴图缓存为"经典黑猫"皮肤，再尝试恢复上次选择的皮肤 */
+    /* 换装：把模型自带的原始贴图/粗糙度/金属度缓存为"经典黑猫"皮肤，再尝试恢复上次选择的皮肤 */
     if (CAT.material) {
-      CAT.skinCache['default'] = Promise.resolve({ map: CAT.material.map, normalMap: CAT.material.normalMap });
+      CAT.skinCache['default'] = Promise.resolve({
+        map: CAT.material.map, normalMap: CAT.material.normalMap,
+        roughnessMap: CAT.material.roughnessMap, metalnessMap: CAT.material.metalnessMap,
+        roughness: CAT.material.roughness, metalness: CAT.material.metalness,
+      });
       let savedSkinId = null;
       try { savedSkinId = localStorage.getItem(CAT_SKIN_KEY); } catch (e) { }
       const savedIdx = savedSkinId ? CAT_SKINS.findIndex(s => s.id === savedSkinId) : -1;
