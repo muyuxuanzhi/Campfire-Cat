@@ -66,6 +66,7 @@ canvas{display:block;touch-action:none}
     <div id="bottom-bar-row">
       <button id="sound-toggle" class="pill-btn active" title="环境音开关">🔊</button>
       <button id="fps-toggle" class="pill-btn" title="点击切换目标帧率，配置较低的设备可选择较低帧率更流畅">帧率:60</button>
+      <button id="cat-skin-toggle" class="pill-btn" title="切换猫咪花色">换装</button>
       <button id="decor-toggle" class="pill-btn">装饰模式</button>
       <div id="furniture-bar">
         <button class="furn-btn" data-type="lantern">灯笼</button>
@@ -1283,10 +1284,56 @@ const CAT = {
   facingYaw: 0, yawOffset: 0,
   feet: [], groundY: 0,
   buffZones: [], activeZoneIds: {},
+  material: null, skinIndex: 0, skinCache: {},
 };
 const _catFootVec = new THREE.Vector3();
 const catLoader = new GLTFLoader();
 const CAT_FOOT_BONE_NAMES = ['leg_front_left_toe', 'leg_front_right_toe', 'leg_hind_left_toe', 'leg_hind_right_toe'];
+/* ---- 猫咪换装：模型完全不变，只替换材质的贴图（base_color + normal），
+   贴图按需懒加载并缓存，避免一次性加载全部皮肤增加流量 ---- */
+const CAT_SKINS = [
+  { id: 'default', name: '经典黑猫' },
+  { id: 'orange', name: '橘猫' },
+  { id: 'calico', name: '奶油三花猫' },
+  { id: 'tuxedo', name: '黑白猫' },
+  { id: 'white', name: '白猫' },
+  { id: 'tabby', name: '深棕虎斑猫' },
+];
+const CAT_SKIN_KEY = 'witch_idle_web_cat_skin_v1';
+const catTexLoader = new THREE.TextureLoader();
+function loadSkinTextures(skinId) {
+  if (CAT.skinCache[skinId]) return CAT.skinCache[skinId];
+  const base = `assets/cat/skins/${skinId}/`;
+  const loadOne = (file, isColor) => new Promise((resolve, reject) => {
+    catTexLoader.load(base + file, (tex) => {
+      tex.flipY = false;
+      if (isColor) tex.colorSpace = THREE.SRGBColorSpace;
+      resolve(tex);
+    }, undefined, reject);
+  });
+  const p = Promise.all([loadOne('base_color.jpg', true), loadOne('normal.jpg', false)])
+    .then(([map, normalMap]) => ({ map, normalMap }));
+  CAT.skinCache[skinId] = p;
+  return p;
+}
+function applyCatSkinTextures(tex) {
+  if (!tex || !CAT.material) return;
+  CAT.material.map = tex.map;
+  CAT.material.normalMap = tex.normalMap;
+  CAT.material.needsUpdate = true;
+}
+function setCatSkin(index, opts = {}) {
+  const silent = !!opts.silent, save = opts.save !== false;
+  if (!CAT.material || !CAT_SKINS.length) return;
+  const idx = ((index % CAT_SKINS.length) + CAT_SKINS.length) % CAT_SKINS.length;
+  const skin = CAT_SKINS[idx];
+  CAT.skinIndex = idx;
+  loadSkinTextures(skin.id).then((tex) => {
+    applyCatSkinTextures(tex);
+    if (!silent) spawnFloatingText(new THREE.Vector3(CAT.position.x, .8, CAT.position.z), '已换装：' + skin.name, '#ffd9a0');
+  }).catch((err) => console.error('猫咪皮肤加载失败(' + skin.id + ')：', err));
+  if (save) { try { localStorage.setItem(CAT_SKIN_KEY, skin.id); } catch (e) { } }
+}
 /* 占位猫咪：在真实模型（约20MB，手机网络下可能较慢或失败）加载完成前，先显示一个简单几何体，
    保证猫咪永远"看得见"，不会因为加载慢/加载失败而在画面上消失 */
 let catPlaceholder = null;
@@ -1315,11 +1362,24 @@ function loadCat() {
     const scale = size.y > 0.0001 ? targetHeight / size.y : 1;
     root.scale.setScalar(scale);
     root.position.y -= box.min.y * scale;
-    root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (o.material) o.material.envMapIntensity = 1.1; } });
+    root.traverse(o => {
+      if (o.isMesh) {
+        o.castShadow = true; o.receiveShadow = true;
+        if (o.material) { o.material.envMapIntensity = 1.1; if (!CAT.material) CAT.material = o.material; }
+      }
+    });
     root.position.set(CAT.position.x, 0, CAT.position.z);
     G.add(root);
     CAT.root = root;
     if (catPlaceholder) { G.remove(catPlaceholder); catPlaceholder = null; }
+    /* 换装：把模型自带的原始贴图缓存为"经典黑猫"皮肤，再尝试恢复上次选择的皮肤 */
+    if (CAT.material) {
+      CAT.skinCache['default'] = Promise.resolve({ map: CAT.material.map, normalMap: CAT.material.normalMap });
+      let savedSkinId = null;
+      try { savedSkinId = localStorage.getItem(CAT_SKIN_KEY); } catch (e) { }
+      const savedIdx = savedSkinId ? CAT_SKINS.findIndex(s => s.id === savedSkinId) : -1;
+      if (savedIdx > 0) setCatSkin(savedIdx, { silent: true, save: false });
+    }
     /* 脚部骨骼：用于每帧动态贴地，消除因绑定姿势与走/跑动画姿态差异造成的穿模与"一跳一跳"抖动 */
     CAT.feet = CAT_FOOT_BONE_NAMES.map(n => root.getObjectByName(n)).filter(Boolean);
     CAT.mixer = new THREE.AnimationMixer(root);
@@ -1664,7 +1724,7 @@ addEventListener('pointerdown', function unlockAudio() { AUDIO.start(); removeEv
 const $ = (id) => document.getElementById(id);
 const stateLabelEl = $('state-label'), countdownEl = $('countdown-label'), sessionEl = $('session-label');
 const startBtn = $('start-btn'), resetBtn = $('reset-btn');
-const decorToggleBtn = $('decor-toggle'), furnitureBar = $('furniture-bar'), deleteToggleBtn = $('delete-toggle'), rotateBtn = $('rotate-btn'), cancelBtn = $('cancel-btn'), hintEl = $('hint-label'), soundToggleBtn = $('sound-toggle'), fpsToggleBtn = $('fps-toggle');
+const decorToggleBtn = $('decor-toggle'), furnitureBar = $('furniture-bar'), deleteToggleBtn = $('delete-toggle'), rotateBtn = $('rotate-btn'), cancelBtn = $('cancel-btn'), hintEl = $('hint-label'), soundToggleBtn = $('sound-toggle'), fpsToggleBtn = $('fps-toggle'), catSkinToggleBtn = $('cat-skin-toggle');
 const presetBtns = Array.from(document.querySelectorAll('.preset-btn'));
 const furnBtns = Array.from(document.querySelectorAll('.furn-btn'));
 const STATE_TEXT = { 0: '点击「开始专注」陪伴喵~', 1: '专注中…', 2: '小憩一下', 3: '长休息，放松一下', 4: '已暂停' };
@@ -1710,6 +1770,11 @@ presetBtns.forEach(b => b.addEventListener('click', () => {
   presetBtns.forEach(x => x.classList.toggle('active', x === b));
   if (GM.state !== GM.State.IDLE) hintEl.textContent = '已切换时长，将在下个番茄钟生效';
 }));
+catSkinToggleBtn.addEventListener('click', () => {
+  AUDIO.playClick();
+  if (!CAT.material) { hintEl.textContent = '猫咪模型加载中，请稍候~'; return; }
+  setCatSkin(CAT.skinIndex + 1);
+});
 decorToggleBtn.addEventListener('click', () => {
   GM.decorMode = !GM.decorMode;
   furnitureBar.style.display = GM.decorMode ? 'flex' : 'none';
