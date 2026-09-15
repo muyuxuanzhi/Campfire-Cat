@@ -67,16 +67,9 @@ canvas{display:block;touch-action:none}
       <button id="sound-toggle" class="pill-btn active" title="环境音开关">🔊</button>
       <button id="fps-toggle" class="pill-btn" title="点击切换目标帧率，配置较低的设备可选择较低帧率更流畅">帧率:60</button>
       <button id="cat-skin-toggle" class="pill-btn" title="切换猫咪花色">换装</button>
+      <button id="scene-toggle" class="pill-btn" title="切换场景">🍄 去爱丽丝仙境</button>
       <button id="decor-toggle" class="pill-btn">装饰模式</button>
-      <div id="furniture-bar">
-        <button class="furn-btn" data-type="lantern">灯笼</button>
-        <button class="furn-btn" data-type="pumpkin">南瓜灯</button>
-        <button class="furn-btn" data-type="small_tree">小树</button>
-        <button class="furn-btn" data-type="big_tree">大树</button>
-        <button class="furn-btn" data-type="mushroom">蘑菇丛</button>
-        <button class="furn-btn" data-type="bench">长椅</button>
-        <button class="furn-btn" data-type="house">小房子</button>
-      </div>
+      <div id="furniture-bar"></div>
       <button id="delete-toggle" class="pill-btn" style="display:none">删除装饰</button>
       <button id="rotate-btn" class="pill-btn" style="display:none">旋转</button>
       <button id="cancel-btn" class="pill-btn" style="display:none">取消</button>
@@ -454,6 +447,13 @@ const M = {
   pumpGl: std({ color: 0xffc247, emissive: 0xff8a1e, emissiveIntensity: 1.9, roughness: .6 }),
   flame: std({ color: 0xfff0c0, emissive: 0xffb45c, emissiveIntensity: 2.4, roughness: .6 }),
   rune: new THREE.MeshBasicMaterial({ map: TX_RUNE, color: 0xd8a0ff, transparent: true, opacity: .55, blending: THREE.AdditiveBlending, depthWrite: false }),
+  /* ---- 爱丽丝仙境主题专属材质 ---- */
+  roseRed: std({ color: 0xd6335f, roughness: .48, metalness: .02, envMapIntensity: 1.1 }),
+  gold: std({ color: 0xd8b256, roughness: .3, metalness: .78, envMapIntensity: 1.6 }),
+  ceramic: std({ color: 0xf2e8d2, roughness: .32, metalness: .04, envMapIntensity: 1.3 }),
+  cardWhite: std({ color: 0xf5efdc, roughness: .55, metalness: 0, side: THREE.DoubleSide }),
+  cardRed: std({ color: 0xb8324a, roughness: .5, side: THREE.DoubleSide }),
+  cardBlack: std({ color: 0x2a2620, roughness: .5, side: THREE.DoubleSide }),
 };
 
 /* ═════ 灯光：黄昏暖橘 + 紫色环境 ═════ */
@@ -475,6 +475,10 @@ rimL.position.set(16, 5, 14); scene.add(rimL);
 const moonL = sunL;   // 兼容后续引用
 
 const G = new THREE.Group(); scene.add(G);
+/* 场景切换：TERRAIN 是两个场景共用的地基（猫咪与家具始终立于其上）；
+   ENV_ALICE 是「爱丽丝仙境」主题专属装饰，默认隐藏，与 G（篝火小院主题）互斥显示 */
+const TERRAIN = new THREE.Group(); scene.add(TERRAIN);
+const ENV_ALICE = new THREE.Group(); ENV_ALICE.visible = false; scene.add(ENV_ALICE);
 
 /* ═════ 工具 ═════ */
 function mesh(geo, mat, x, y, z, p = G, s = true) {
@@ -494,26 +498,26 @@ function halo(sx, sy, c, o, x, y, z, p = G) {
   s.scale.set(sx, sy, 1); s.position.set(x, y, z); p.add(s); return s;
 }
 
-/* ═════ 底座 + 地面 ═════ */
+/* ═════ 底座 + 地面（两个场景共用地基，放入 TERRAIN，不随场景切换隐藏） ═════ */
 const BW = 22;
-box(BW, .9, BW, M.base, 0, -.45, 0, G, false);
-box(BW + .5, .24, BW + .5, M.baseRim, 0, -1.02, 0, G, false);
-box(BW + .9, .14, BW + .9, M.dark, 0, -1.21, 0, G, false);
-ground(BW, BW, M.dirt, 0, 0, G, .004);
+box(BW, .9, BW, M.base, 0, -.45, 0, TERRAIN, false);
+box(BW + .5, .24, BW + .5, M.baseRim, 0, -1.02, 0, TERRAIN, false);
+box(BW + .9, .14, BW + .9, M.dark, 0, -1.21, 0, TERRAIN, false);
+ground(BW, BW, M.dirt, 0, 0, TERRAIN, .004);
 /* 外围地面：方形主台之外原本是空的（没有任何地面），导致方台边缘到外圈环形树林之间
    出现一圈悬空的黑色缝隙。这里铺一个大圆盘地面（比远景树林外沿略大），衔接方台与树林 */
 {
   const outerGround = new THREE.Mesh(new THREE.CircleGeometry(24, 64), M.dirt);
-  outerGround.rotation.x = -Math.PI / 2; outerGround.position.y = -.012; outerGround.receiveShadow = true; G.add(outerGround);
+  outerGround.rotation.x = -Math.PI / 2; outerGround.position.y = -.012; outerGround.receiveShadow = true; TERRAIN.add(outerGround);
 }
 
-/* 圆形石板广场（中心偏右） */
+/* 圆形石板广场（中心偏右）：篝火场景的火堆与爱丽丝场景的茶会桌都摆在这块共用广场上 */
 const PZX = 1.4, PZZ = -0.6, PZR = 4.5;
 {
   const p = new THREE.Mesh(new THREE.CircleGeometry(PZR, 48), M.flag);
-  p.rotation.x = -Math.PI / 2; p.position.set(PZX, .016, PZZ); p.receiveShadow = true; G.add(p);
+  p.rotation.x = -Math.PI / 2; p.position.set(PZX, .016, PZZ); p.receiveShadow = true; TERRAIN.add(p);
   const ring = new THREE.Mesh(new THREE.TorusGeometry(PZR + .02, .09, 6, 56), M.rock);
-  ring.rotation.x = Math.PI / 2; ring.position.set(PZX, .05, PZZ); ring.castShadow = ring.receiveShadow = true; G.add(ring);
+  ring.rotation.x = Math.PI / 2; ring.position.set(PZX, .05, PZZ); ring.castShadow = ring.receiveShadow = true; TERRAIN.add(ring);
 }
 /* 石板小径：广场 → 小屋 */
 for (let i = 0; i < 8; i++) {
@@ -1172,6 +1176,119 @@ const sparks = new THREE.Points(spkGeo, new THREE.PointsMaterial({
 scene.add(sparks);
 
 /* ═════════════════════════════════════════════════════════════
+   爱丽丝仙境场景（ENV_ALICE）：与篝火小院（G）共用同一块 TERRAIN 地基，
+   默认隐藏，点击「切换场景」按钮后与 G 互斥显示。
+   ═════════════════════════════════════════════════════════════ */
+{
+  const AL = ENV_ALICE;
+
+  /* 疯帽匠茶会圆桌：占用与篝火同一块石板广场 */
+  {
+    const tableY = .62;
+    cyl(.06, .07, tableY, M.wd, PZX, tableY / 2, PZZ, AL, 10);
+    cyl(1.15, 1.15, .08, M.ww, PZX, tableY, PZZ, AL, 24);
+    mesh(new THREE.TorusGeometry(1.12, .03, 6, 32), M.gold, PZX, tableY + .045, PZZ, AL);
+    cyl(.24, .3, .34, M.ceramic, PZX, tableY + .21, PZZ, AL, 16);
+    { const spout = cyl(.05, .07, .32, M.ceramic, PZX + .3, tableY + .22, PZZ, AL, 8); spout.rotation.z = Math.PI / 2.6; }
+    mesh(new THREE.TorusGeometry(.16, .025, 6, 16), M.ceramic, PZX - .3, tableY + .3, PZZ, AL).rotation.set(0, 0, Math.PI / 2);
+    cone(.1, .16, M.ceramic, PZX, tableY + .43, PZZ, AL, 10, false);
+    for (let i = 0; i < 3; i++) {
+      const a = i / 3 * Math.PI * 2 + .4;
+      const cx = PZX + Math.cos(a) * .75, cz = PZZ + Math.sin(a) * .75;
+      cyl(.13, .15, .16, M.ceramic, cx, tableY + .12, cz, AL, 14);
+      cyl(.2, .2, .02, M.ceramic, cx, tableY + .05, cz, AL, 16);
+    }
+    for (let i = 0; i < 3; i++) {
+      const a = i / 3 * Math.PI * 2 - .8;
+      const cx = PZX + Math.cos(a) * 1.75, cz = PZZ + Math.sin(a) * 1.75;
+      cyl(.32, .38, .5, M.bark, cx, .25, cz, AL, 10);
+      sph(.34, M.bark, cx, .52, cz, AL, 10, false);
+    }
+  }
+
+  /* 巨型蘑菇丛（呼应「吃我 / 喝我」变大变小的蘑菇），散布在茶会桌周围 */
+  function giantMush(x, z, h, capR, capMat) {
+    cyl(h * .16, h * .22, h, M.mushS, x, h / 2, z, AL, 10);
+    const cap = sph(capR, capMat, x, h + capR * .55, z, AL, 16, false); cap.scale.set(1, .58, 1);
+    for (let i = 0; i < 6; i++) sph(.05 + rr(0, .02), M.mushS, x + rr(-capR * .6, capR * .6), h + capR * .95, z + rr(-capR * .6, capR * .6), AL, 6, false);
+  }
+  giantMush(PZX - 3.2, PZZ + 2.4, 1.9, .95, M.mushR);
+  giantMush(PZX + 3.6, PZZ - 1.6, 1.4, .68, M.mushP);
+  giantMush(PZX - 2.0, PZZ - 3.0, 1.0, .5, M.mushR);
+  giantMush(-6.0, 4.6, .7, .38, M.mushP);
+  giantMush(5.4, 5.8, .55, .3, M.mushR);
+
+  /* 玫瑰拱门：通往「兔子洞」方向的小径入口 */
+  {
+    const ax = -5.6, az = 5.2;
+    for (let i = 0; i <= 12; i++) {
+      const t = i / 12, ang = Math.PI * t;
+      const x = ax + Math.cos(ang) * 1.3, y = .1 + Math.sin(ang) * 2.1;
+      cyl(.035, .04, .5, M.vine, x, y, az, AL, 5).rotation.z = ang;
+    }
+    for (let i = 0; i < 22; i++) {
+      const t = rr(0, 1), ang = Math.PI * t;
+      const x = ax + Math.cos(ang) * 1.3 + rr(-.15, .15), y = .1 + Math.sin(ang) * 2.1 + rr(-.15, .15);
+      sph(rr(.06, .11), M.roseRed, x, y, az + rr(-.15, .15), AL, 7, false);
+    }
+    for (let i = 0; i < 5; i++) {
+      const t = rr(0, 1), ang = Math.PI * t;
+      const x = ax + Math.cos(ang) * 1.3, y = .1 + Math.sin(ang) * 2.1;
+      const lf = mesh(new THREE.PlaneGeometry(.26, .16), M.leaf, x, y, az + rr(-.2, .2), AL);
+      lf.rotation.set(rr(-.4, .4), rr(0, 3), rr(-.3, .3));
+    }
+    for (const dz of [-.9, .9]) {
+      for (let i = 0; i < 5; i++) sph(rr(.08, .14), M.roseRed, ax + rr(-.5, .5), rr(.15, .55), az + dz + rr(-.4, .4), AL, 7, false);
+    }
+  }
+
+  /* 巨大的怀表：斜靠在广场边缘草地上 */
+  {
+    const wx = PZX + 4.6, wz = PZZ + 3.4;
+    const body = cyl(1.0, 1.05, .3, M.gold, wx, .55, wz, AL, 32); body.rotation.z = .18; body.rotation.x = -1.1;
+    const face = new THREE.Mesh(new THREE.CircleGeometry(.82, 32), M.cardWhite); face.position.set(wx, .78, wz + .28); face.rotation.x = -1.35; AL.add(face);
+    const crown = cyl(.12, .14, .3, M.gold, wx + .95, 1.0, wz + .3, AL, 8); crown.rotation.z = .5;
+  }
+
+  /* 扑克牌卫兵：两张斜靠的巨型扑克牌 */
+  function bigCard(x, z, ry, mat) {
+    const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; g.rotation.x = -.12; AL.add(g);
+    box(1.1, 1.6, .06, M.cardWhite, 0, .8, 0, g);
+    const pip = mesh(new THREE.PlaneGeometry(.5, .5), mat, 0, .8, .04, g); pip.rotation.z = Math.PI / 4;
+  }
+  bigCard(-3.4, -2.0, .5, M.cardRed);
+  bigCard(-2.5, -2.7, -.3, M.cardBlack);
+
+  /* 柴郡猫的树：圆润的小树，枝头挂着若隐若现的笑容与眼睛 */
+  {
+    const tx = 4.0, tz = 3.2;
+    cyl(.16, .22, 1.4, M.bark, tx, .7, tz, AL, 8);
+    for (let i = 0; i < 3; i++) sph(.66 - i * .08, M.leaf, tx, 1.55 + i * .34, tz, AL, 12, false);
+    halo(1.1, .55, 0xfff2c8, .8, tx, 2.1, tz + .5, AL);
+    halo(.16, .16, 0xdfffb0, .95, tx - .32, 2.3, tz + .52, AL);
+    halo(.16, .16, 0xdfffb0, .95, tx + .32, 2.3, tz + .52, AL);
+  }
+
+  /* 散落的小蘑菇、蕨叶、花朵，让地面不至于空荡 */
+  for (let i = 0; i < 40; i++) {
+    const a = rr(0, Math.PI * 2), d = rr(6, 17.5);
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    if (Math.hypot(x - PZX, z - PZZ) < PZR + 1) continue;
+    const r = RN();
+    if (r < .4) { cyl(.04, .06, .18, M.mushS, x, .09, z, AL, 6); const c = sph(.13, RN() > .5 ? M.mushR : M.mushP, x, .2, z, AL, 8, false); c.scale.set(1, .6, 1); }
+    else if (r < .75) { const f = mesh(new THREE.PlaneGeometry(.5, .5), M.fern, x, .25, z, AL); f.rotation.y = rr(0, 3); }
+    else { const gr = mesh(new THREE.PlaneGeometry(.6, .55), M.grass, x, .28, z, AL); gr.rotation.y = rr(0, 3); }
+  }
+
+  /* 两盏漂浮的茶杯灯笼，为场景补光（篝火火把在此场景隐藏） */
+  for (const [lx, lz] of [[PZX - 3.0, PZZ - 2.4], [PZX + 2.6, PZZ + 3.4]]) {
+    cyl(.14, .17, .17, M.ceramic, lx, 1.5, lz, AL, 14);
+    const li = new THREE.PointLight(0xffe2a8, 1.3, 6, 2.0); li.position.set(lx, 1.55, lz); AL.add(li);
+    halo(.9, .9, 0xffe2a8, .5, lx, 1.55, lz, AL);
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════
    番茄钟桌面陪伴放置游戏：GameManager + 黑猫 + 装饰摆放 + UI
    ═════════════════════════════════════════════════════════════ */
 
@@ -1179,9 +1296,18 @@ scene.add(sparks);
 const GM = (() => {
   const SAVE_KEY = 'witch_idle_web_save_v1';
   const State = { IDLE: 0, WORK: 1, SHORT_BREAK: 2, LONG_BREAK: 3, PAUSED: 4 };
-  const FURNITURE_NAMES = { lantern: '灯笼', small_tree: '小树', mushroom: '蘑菇丛', bench: '长椅', pumpkin: '南瓜灯', big_tree: '大树', house: '小房子' };
+  /* 场景与场景专属家具：切换场景只影响可摆放的家具种类和已摆放清单，
+     计时器 State / focusPoints / activeBuffs 等番茄钟相关字段完全独立，不受场景切换影响 */
+  const SCENE_IDS = ['campfire', 'alice'];
+  const SCENE_NAMES = { campfire: '篝火小院', alice: '爱丽丝仙境' };
+  const FURNITURE_SETS = {
+    campfire: { lantern: '灯笼', small_tree: '小树', mushroom: '蘑菇丛', bench: '长椅', pumpkin: '南瓜灯', big_tree: '大树', house: '小房子' },
+    alice: { teacup: '茶杯', rose: '玫瑰', playing_card: '扑克牌', pocket_watch: '怀表', toadstool: '斑点蘑菇', candle: '烛台', looking_glass: '穿梭镜' },
+  };
   const gm = {
-    State, FURNITURE_NAMES,
+    State, SCENE_IDS, SCENE_NAMES,
+    get FURNITURE_NAMES() { return FURNITURE_SETS[this.currentScene]; },
+    currentScene: 'campfire',
     state: State.IDLE, stateBeforePause: State.IDLE,
     workDuration: 25 * 60, shortBreakDuration: 5 * 60, longBreakDuration: 15 * 60,
     sessionsBeforeLongBreak: 4,
@@ -1190,11 +1316,18 @@ const GM = (() => {
     focusPoints: 0,
     activeBuffs: {},
     buildRadiusBase: 12.0, buildRadiusMax: 19.0, buildRadiusPerSession: 0.9, sessionsForMaxRadius: 8,
-    placedItems: [],
+    placedItemsByScene: { campfire: [], alice: [] },
+    get placedItems() { return this.placedItemsByScene[this.currentScene]; },
     decorMode: false, selectedFurniture: '', deleteMode: false,
     _listeners: {},
     on(evt, fn) { (this._listeners[evt] = this._listeners[evt] || []).push(fn); },
     emit(evt, ...a) { (this._listeners[evt] || []).forEach(fn => fn(...a)); },
+    switchScene(id) {
+      if (!SCENE_IDS.includes(id) || id === this.currentScene) return;
+      this.currentScene = id;
+      this.decorMode = false; this.selectedFurniture = ''; this.deleteMode = false;
+      this.emit('sceneChanged', id); this.save();
+    },
     getBuildRadius() { const steps = Math.min(this.sessionCount, this.sessionsForMaxRadius); return Math.min(this.buildRadiusMax, this.buildRadiusBase + this.buildRadiusPerSession * steps); },
     getTotalBuff() { let b = 0; for (const k in this.activeBuffs) b += this.activeBuffs[k]; return b; },
     startTimer() { if (this.state === State.IDLE) { this.state = State.WORK; this.totalDuration = this.workDuration; this.remaining = this.workDuration; this.emit('state'); this.emit('time', this.remaining, this.totalDuration); } },
@@ -1220,7 +1353,7 @@ const GM = (() => {
     setBuff(id, ratio) { this.activeBuffs[id] = ratio; this.emit('buff', this.getTotalBuff()); },
     clearBuff(id) { if (id in this.activeBuffs) { delete this.activeBuffs[id]; this.emit('buff', this.getTotalBuff()); } },
     placeFurniture(type, pos, ry) {
-      if (!(type in FURNITURE_NAMES)) return false;
+      if (!(type in this.FURNITURE_NAMES)) return false;
       if (Math.hypot(pos.x, pos.z) > this.getBuildRadius()) return false;
       const item = { type, x: pos.x, z: pos.z, ry };
       const idx = this.placedItems.push(item) - 1;
@@ -1239,13 +1372,26 @@ const GM = (() => {
         if (this.remaining <= 0) this.advanceState();
       }
     },
-    save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify({ sessionCount: this.sessionCount, focusPoints: this.focusPoints, placedItems: this.placedItems })); } catch (e) { } },
+    save() {
+      try {
+        localStorage.setItem(SAVE_KEY, JSON.stringify({
+          sessionCount: this.sessionCount, focusPoints: this.focusPoints,
+          currentScene: this.currentScene, placedItemsByScene: this.placedItemsByScene,
+        }));
+      } catch (e) { }
+    },
     load() {
       try {
         const raw = localStorage.getItem(SAVE_KEY); if (!raw) return;
         const d = JSON.parse(raw);
         this.sessionCount = d.sessionCount || 0; this.focusPoints = d.focusPoints || 0;
-        this.placedItems = Array.isArray(d.placedItems) ? d.placedItems : [];
+        if (d.placedItemsByScene && typeof d.placedItemsByScene === 'object') {
+          this.placedItemsByScene.campfire = Array.isArray(d.placedItemsByScene.campfire) ? d.placedItemsByScene.campfire : [];
+          this.placedItemsByScene.alice = Array.isArray(d.placedItemsByScene.alice) ? d.placedItemsByScene.alice : [];
+        } else if (Array.isArray(d.placedItems)) {
+          this.placedItemsByScene.campfire = d.placedItems; // 兼容切换场景功能上线前的旧存档
+        }
+        if (d.currentScene && SCENE_IDS.includes(d.currentScene)) this.currentScene = d.currentScene;
       } catch (e) { }
     },
   };
@@ -1361,7 +1507,7 @@ function buildCatPlaceholder() {
 }
 function loadCat() {
   catPlaceholder = buildCatPlaceholder();
-  G.add(catPlaceholder);
+  scene.add(catPlaceholder);
   catLoader.load('assets/cat/rig.glb', (gltf) => {
     const root = gltf.scene;
     const box = new THREE.Box3().setFromObject(root);
@@ -1377,9 +1523,9 @@ function loadCat() {
       }
     });
     root.position.set(CAT.position.x, 0, CAT.position.z);
-    G.add(root);
+    scene.add(root);
     CAT.root = root;
-    if (catPlaceholder) { G.remove(catPlaceholder); catPlaceholder = null; }
+    if (catPlaceholder) { scene.remove(catPlaceholder); catPlaceholder = null; }
     /* 换装：把模型自带的原始贴图/粗糙度/金属度缓存为"经典黑猫"皮肤，再尝试恢复上次选择的皮肤 */
     if (CAT.material) {
       CAT.skinCache['default'] = Promise.resolve({
@@ -1476,7 +1622,10 @@ function checkCatBuffs() {
 loadCat();
 
 /* ---- 装饰摆放：家具建造（对应 SceneBuilder.gd 的 _build_furniture_visual） ---- */
-const furnitureRoot = new THREE.Group(); G.add(furnitureRoot);
+/* 装饰摆放：家具建造（对应 SceneBuilder.gd 的 _build_furniture_visual）
+   放在 scene 顶层而不是 G/ENV_ALICE 内部，这样切换场景（隐藏/显示 G 或 ENV_ALICE）
+   永远不会影响已放置的装饰物是否可见——装饰物按当前场景单独维护、单独重建 */
+const furnitureRoot = new THREE.Group(); scene.add(furnitureRoot);
 function buildFurnitureVisual(type, x, z, ry, mode = 'real') {
   const n = new THREE.Group(); n.position.set(x, 0, z); n.rotation.y = ry;
   switch (type) {
@@ -1518,6 +1667,54 @@ function buildFurnitureVisual(type, x, z, ry, mode = 'real') {
       box(.32, .5, .04, M.wd, 0, .35, .655, n);
       { const wg = mesh(new THREE.PlaneGeometry(.24, .24), M.win, -.42, .68, .655, n); wg.rotation.y = Math.PI; }
       break;
+    /* ---- 以下是「爱丽丝仙境」场景专属可摆放家具 ---- */
+    case 'teacup': {
+      cyl(.22, .22, .025, M.ceramic, 0, .012, 0, n, 20);
+      cyl(.14, .17, .19, M.ceramic, 0, .12, 0, n, 16);
+      const tea = new THREE.Mesh(new THREE.CircleGeometry(.13, 16), M.brew); tea.rotation.x = -Math.PI / 2; tea.position.set(0, .206, 0); n.add(tea);
+      const hd = mesh(new THREE.TorusGeometry(.09, .018, 6, 14, Math.PI), M.ceramic, .16, .13, 0, n); hd.rotation.y = Math.PI / 2;
+      break;
+    }
+    case 'rose': {
+      cyl(.03, .04, .68, M.vine, 0, .34, 0, n, 6);
+      for (let i = 0; i < 3; i++) { const lf = mesh(new THREE.PlaneGeometry(.22, .14), M.leaf, rr(-.12, .12), .2 + rr(0, .28), rr(-.12, .12), n); lf.rotation.set(rr(-.4, .4), rr(0, 3), rr(-.3, .3)); }
+      for (let k = 0; k < 3; k++) sph(.09 - k * .018, M.roseRed, 0, .72 - k * .02, 0, n, 8, false);
+      break;
+    }
+    case 'playing_card': {
+      box(.32, .46, .02, M.cardWhite, 0, .23, 0, n);
+      const suit = mesh(new THREE.PlaneGeometry(.14, .14), M.cardRed, 0, .23, .012, n); suit.rotation.z = Math.PI / 4;
+      const n2 = new THREE.Group(); n2.position.set(-.28, 0, .1); n2.rotation.y = -.35; n.add(n2);
+      box(.32, .46, .02, M.cardWhite, 0, .23, 0, n2);
+      const suit2 = mesh(new THREE.PlaneGeometry(.14, .14), M.cardBlack, 0, .23, .012, n2); suit2.rotation.z = Math.PI / 4;
+      break;
+    }
+    case 'pocket_watch': {
+      cyl(.28, .3, .1, M.gold, 0, .05, 0, n, 28);
+      const face = new THREE.Mesh(new THREE.CircleGeometry(.23, 28), M.cardWhite); face.rotation.x = -Math.PI / 2; face.position.set(0, .101, 0); n.add(face);
+      cyl(.035, .04, .09, M.gold, .3, .09, 0, n, 8);
+      const loop = mesh(new THREE.TorusGeometry(.05, .014, 6, 12), M.gold, .38, .09, 0, n); loop.rotation.z = Math.PI / 2;
+      break;
+    }
+    case 'toadstool': {
+      cyl(.05, .07, .5, M.mushS, 0, .25, 0, n, 8);
+      { const cap = sph(.32, M.mushR, 0, .56, 0, n, 14, false); cap.scale.set(1, .6, 1); }
+      for (let i = 0; i < 4; i++) sph(.045, M.mushS, rr(-.22, .22), .6 + rr(0, .05), rr(-.22, .22), n, 6, false);
+      break;
+    }
+    case 'candle': {
+      cyl(.09, .11, .04, M.ironD, 0, .02, 0, n, 10);
+      cyl(.035, .04, .32, M.wax, 0, .2, 0, n, 8);
+      cone(.03, .09, M.flame, 0, .4, 0, n, 6, false);
+      if (mode !== 'ghost') { const li = new THREE.PointLight(0xffb45c, 1.1, 2.2, 2.0); li.position.set(0, .42, 0); n.add(li); }
+      break;
+    }
+    case 'looking_glass': {
+      cyl(.05, .06, .75, M.wd, 0, .375, 0, n, 8);
+      mesh(new THREE.TorusGeometry(.32, .045, 10, 28), M.gold, 0, .95, 0, n);
+      { const glass = new THREE.Mesh(new THREE.CircleGeometry(.28, 24), M.win); glass.position.set(0, .95, .03); n.add(glass); }
+      break;
+    }
   }
   if (mode === 'ghost') {
     const gm2 = new THREE.MeshBasicMaterial({ color: 0x8cffa5, transparent: true, opacity: .45, depthWrite: false });
@@ -1563,7 +1760,7 @@ let expandRing = new THREE.Mesh(
   new THREE.MeshBasicMaterial({ color: 0x96c8ff, transparent: true, opacity: .35, side: THREE.DoubleSide, depthWrite: false })
 );
 expandRing.rotation.x = -Math.PI / 2; expandRing.position.y = .015; expandRing.visible = false;
-G.add(expandRing);
+scene.add(expandRing);
 GM.on('buildRadius', (r) => { expandRing.geometry.dispose(); expandRing.geometry = new THREE.RingGeometry(Math.max(.01, r - .03), r + .03, 64); });
 
 /* ---- 拾取地面：点击遛猫 / 装饰模式下预览放置 ---- */
@@ -1580,12 +1777,12 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   pointerNDC.y = -(e.clientY / innerHeight) * 2 + 1;
 });
 let ghostMesh = null, ghostType = '', ghostRot = 0, ghostOk = false;
-function clearGhost() { if (ghostMesh) { G.remove(ghostMesh); ghostMesh = null; } ghostType = ''; }
+function clearGhost() { if (ghostMesh) { scene.remove(ghostMesh); ghostMesh = null; } ghostType = ''; }
 function updateGhost() {
   if (!GM.decorMode || !GM.selectedFurniture) { if (ghostMesh) clearGhost(); return; }
   if (ghostType !== GM.selectedFurniture) {
     clearGhost(); ghostType = GM.selectedFurniture;
-    ghostMesh = buildFurnitureVisual(ghostType, 0, 0, ghostRot, 'ghost'); G.add(ghostMesh);
+    ghostMesh = buildFurnitureVisual(ghostType, 0, 0, ghostRot, 'ghost'); scene.add(ghostMesh);
   }
   if (!ghostMesh) return;
   const hit = raycastGround();
@@ -1736,9 +1933,9 @@ addEventListener('pointerdown', function unlockAudio() { AUDIO.start(); removeEv
 const $ = (id) => document.getElementById(id);
 const stateLabelEl = $('state-label'), countdownEl = $('countdown-label'), sessionEl = $('session-label');
 const startBtn = $('start-btn'), resetBtn = $('reset-btn');
-const decorToggleBtn = $('decor-toggle'), furnitureBar = $('furniture-bar'), deleteToggleBtn = $('delete-toggle'), rotateBtn = $('rotate-btn'), cancelBtn = $('cancel-btn'), hintEl = $('hint-label'), soundToggleBtn = $('sound-toggle'), fpsToggleBtn = $('fps-toggle'), catSkinToggleBtn = $('cat-skin-toggle');
+const decorToggleBtn = $('decor-toggle'), furnitureBar = $('furniture-bar'), deleteToggleBtn = $('delete-toggle'), rotateBtn = $('rotate-btn'), cancelBtn = $('cancel-btn'), hintEl = $('hint-label'), soundToggleBtn = $('sound-toggle'), fpsToggleBtn = $('fps-toggle'), catSkinToggleBtn = $('cat-skin-toggle'), sceneToggleBtn = $('scene-toggle');
 const presetBtns = Array.from(document.querySelectorAll('.preset-btn'));
-const furnBtns = Array.from(document.querySelectorAll('.furn-btn'));
+let furnBtns = [];
 const STATE_TEXT = { 0: '点击「开始专注」陪伴喵~', 1: '专注中…', 2: '小憩一下', 3: '长休息，放松一下', 4: '已暂停' };
 const PRESETS = { '15': { work: 15, short: 5, long: 10 }, '25': { work: 25, short: 5, long: 15 }, '45': { work: 45, short: 15, long: 20 } };
 
@@ -1775,6 +1972,41 @@ GM.on('sessionCompleted', updateSessionUI);
 GM.on('sessionCompleted', () => AUDIO.playMeow());
 GM.on('buff', updateSessionUI);
 
+/* ---- 家具工具栏：按当前场景（篝火小院 / 爱丽丝仙境）动态渲染不同的可摆放家具 ---- */
+function renderFurnitureBar() {
+  const names = GM.FURNITURE_NAMES;
+  furnitureBar.innerHTML = Object.keys(names).map(type => `<button class="furn-btn" data-type="${type}">${names[type]}</button>`).join('');
+  furnBtns = Array.from(document.querySelectorAll('.furn-btn'));
+  furnBtns.forEach(b => b.addEventListener('click', () => {
+    const type = b.dataset.type;
+    GM.deleteMode = false; deleteToggleBtn.classList.remove('delete-active');
+    GM.selectedFurniture = GM.selectedFurniture === type ? '' : type;
+    furnBtns.forEach(x => x.classList.toggle('active', x.dataset.type === GM.selectedFurniture));
+    refreshDecorButtonsVisibility(); updateHint();
+  }));
+}
+/* ---- 场景切换：只切换环境装饰(G/ENV_ALICE)与家具摆放清单，猫咪、番茄钟计时器、BGM 完全不受影响 ---- */
+function applySceneVisual(id, opts = {}) {
+  const isAlice = id === 'alice';
+  G.visible = !isAlice; ENV_ALICE.visible = isAlice;
+  sparks.visible = !isAlice; /* 篝火的火星粒子是直接挂在 scene 上的，需单独隐藏 */
+  clearGhost();
+  if (GM.decorMode) {
+    GM.decorMode = false;
+    decorToggleBtn.textContent = '装饰模式'; decorToggleBtn.classList.remove('active');
+    furnitureBar.style.display = 'none'; expandRing.visible = false;
+  }
+  renderFurnitureBar();
+  rebuildPlacedFurniture();
+  sceneToggleBtn.textContent = isAlice ? '🔥 回篝火小院' : '🍄 去爱丽丝仙境';
+  refreshDecorButtonsVisibility(); updateHint();
+  if (!opts.silent) spawnFloatingText(new THREE.Vector3(CAT.position.x, 1.2, CAT.position.z), '已切换到「' + GM.SCENE_NAMES[id] + '」', '#ffe9c8');
+}
+sceneToggleBtn.addEventListener('click', () => {
+  GM.switchScene(GM.currentScene === 'campfire' ? 'alice' : 'campfire');
+});
+GM.on('sceneChanged', (id) => applySceneVisual(id));
+
 startBtn.addEventListener('click', () => { if (GM.state === GM.State.IDLE) GM.startTimer(); else GM.togglePause(); });
 resetBtn.addEventListener('click', () => GM.resetTimer());
 presetBtns.forEach(b => b.addEventListener('click', () => {
@@ -1799,13 +2031,6 @@ decorToggleBtn.addEventListener('click', () => {
   }
   refreshDecorButtonsVisibility(); updateHint();
 });
-furnBtns.forEach(b => b.addEventListener('click', () => {
-  const type = b.dataset.type;
-  GM.deleteMode = false; deleteToggleBtn.classList.remove('delete-active');
-  GM.selectedFurniture = GM.selectedFurniture === type ? '' : type;
-  furnBtns.forEach(x => x.classList.toggle('active', x.dataset.type === GM.selectedFurniture));
-  refreshDecorButtonsVisibility(); updateHint();
-}));
 deleteToggleBtn.addEventListener('click', () => {
   GM.deleteMode = !GM.deleteMode;
   if (GM.deleteMode) { GM.selectedFurniture = ''; furnBtns.forEach(b => b.classList.remove('active')); clearGhost(); }
@@ -1842,6 +2067,7 @@ updateFpsBtn();
 /* 所有 UI 按钮点击时播放轻柔的提示音 */
 document.getElementById('ui-root').addEventListener('click', (e) => { if (e.target.closest('button')) AUDIO.playClick(); });
 updateStateUI(); updateTimeUI(GM.remaining); updateSessionUI(); updateHint(); refreshDecorButtonsVisibility();
+applySceneVisual(GM.currentScene, { silent: true }); /* 按存档恢复的场景初始化环境显示与家具工具栏 */
 
 /* ═════ 动画 ═════ */
 const clock = new THREE.Clock();
